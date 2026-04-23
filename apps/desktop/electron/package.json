@@ -16,17 +16,17 @@
   },
   "dependencies": {
     "@agents/shared": "workspace:*",
-    "electron": "^40.6.0"
+    "electron": "^41.3.0"
   },
   "devDependencies": {
     "@agents/contracts": "workspace:*",
     "@types/node": "catalog:",
-    "electron-builder": "^26.0.12",
-    "electronmon": "^2.0.2",
+    "electron-builder": "^26.8.1",
+    "electronmon": "^2.0.4",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "wait-on": "^8.0.5"
+    "wait-on": "^9.0.5"
   },
   "build": {
     "appId": "com.agents.agents",

@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
+    "typeRoots": ["./node_modules/@types", "../../node_modules/@types"],
     "types": ["node", "bun"],
     "lib": ["ES2023", "esnext.disposable"],
     "noEmit": true,

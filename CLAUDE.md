@@ -27,9 +27,8 @@ Long term maintainability is a core priority. If you add new functionality, firs
 
 - `apps/server`: Node.js WebSocket server. Manages provider sessions (Codex, Gemini, Claude Code), serves the React web app, and coordinates orchestration domain events.
 - `apps/web`: React/Vite UI. Owns session UX, conversation/event rendering, and client-side state. Connects to the server via WebSocket.
-- `apps/desktop/tauri`: Tauri 2 desktop shell. Spawns a desktop-scoped `agents` backend process and loads the shared web app.
-- `apps/desktop/qt6`: Qt6 (C++) desktop shell. Same flow as Tauri — WebEngine hosts the web app; spawns server in production or uses dev-runner URL in dev. No Python.
-- `packages/contracts`: Shared Zod schemas and TypeScript contracts for provider events, WebSocket protocol, and model/session types. Keep this package schema-only — no runtime logic.
+- `apps/desktop/electron`: Electron desktop shell. Spawns a desktop-scoped `agents` backend process, exposes the `DesktopBridge` IPC, and loads the shared web app.
+- `packages/contracts`: Shared Effect/Schema schemas and TypeScript contracts for provider events, WebSocket protocol, and model/session types. Keep this package schema-only — no runtime logic.
 - `packages/shared`: Shared runtime utilities consumed by both server and web. Uses explicit subpath exports (e.g. `@agents/shared/git`) — no barrel index.
 
 ## Provider Architecture
@@ -68,10 +67,12 @@ All adapters are registered in `serverLayers.ts` via `ProviderAdapterRegistryLiv
 | `src/claudeCodeAppServerHelpers.ts`              | Claude Code pure utilities                                          |
 | `src/provider/Layers/ClaudeCodeAdapter.ts`       | Claude Code Effect adapter layer                                    |
 | `src/provider/Layers/ProviderAdapterRegistry.ts` | In-memory adapter registry                                          |
+| `src/provider/Layers/ProviderService.ts`         | Routes API calls to registered adapters                             |
 | `src/orchestration/`                             | Domain event engine; projects runtime events → orchestration events |
-| `src/checkpointing/`                             | Diff tracking                                                       |
+| `src/checkpointing/`                             | Diff tracking per session turn                                      |
 | `src/git/`                                       | Git operations                                                      |
 | `src/terminal/`                                  | PTY management (Bun or node-pty)                                    |
+| `src/persistence/`                               | SQLite-backed event store & repositories                            |
 
 ## Web App
 
@@ -79,14 +80,35 @@ All adapters are registered in `serverLayers.ts` via `ProviderAdapterRegistryLiv
 - State: Zustand (`store.ts`) with localStorage persistence
 - Session logic: `session-logic.ts`
 - WebSocket RPC client: `nativeApi.ts` / `wsNativeApi.ts`
+- UI components: Base UI + Tailwind CSS v4 + shadcn/ui (base-mira theme)
+- Rich text: Lexical editor for composer, react-markdown for rendering
+- Terminal: xterm.js with fit addon
 - Provider types: `"codex" | "gemini" | "claude-code"`
 - Session phases: `"disconnected" | "connecting" | "ready" | "running"`
+- Env vars: `VITE_WS_URL` (custom WebSocket URL), `VITE_NATIVE_API_DISABLED` (desktop webview mode)
+
+## Tooling
+
+| Tool        | Purpose                                          |
+| ----------- | ------------------------------------------------ |
+| Bun         | Package manager, runtime (required: ≥1.3.9)      |
+| Node.js     | Server runtime (required: ^22.13 \|\| ≥24.10)    |
+| tsdown      | TypeScript bundler for server/contracts/electron |
+| Vite 7      | Web app bundler and dev server                   |
+| oxlint      | Linting (Rust-based, replaces ESLint)            |
+| oxfmt       | Formatting (Rust-based, replaces Prettier/Biome) |
+| Vitest      | Unit and browser tests                           |
+| Electron 40 | Desktop shell                                    |
+
+- Default ports: server `3773`, web `5733`
+- Set `AGENTS_DEV_INSTANCE=<name>` to shift all ports together for multiple dev instances
+- Set `AGENTS_PORT_OFFSET=<n>` for explicit numeric port offset
 
 ## WebSocket Protocol
 
 - **Request/Response**: `{ id, method, params }` → `{ id, result }` or `{ id, error }`
 - **Push events**: `{ type: "push", channel, data }`
-- Key methods: `providers.startSession`, `providers.sendTurn`, `providers.interruptTurn`, `providers.respondToRequest`, `providers.stopSession`, `shell.openInEditor`, `server.getConfig`
+- Key methods: `providers.startSession`, `providers.sendTurn`, `providers.interruptTurn`, `providers.respondToRequest`, `providers.respondToUserInput`, `providers.stopSession`, `shell.openInEditor`, `server.getConfig`, `orchestration.getSnapshot`, `orchestration.dispatchCommand`
 - Key push channel: `orchestration.domainEvent` (runtime activity projected into orchestration events server-side)
 
 ## Reference Repos

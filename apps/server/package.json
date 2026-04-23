@@ -27,8 +27,8 @@
     "@pierre/diffs": "^1.1.0-beta.16",
     "effect": "catalog:",
     "node-pty": "^1.1.0",
-    "open": "^10.1.0",
-    "ws": "^8.18.0"
+    "open": "^11.0.0",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@agents/contracts": "workspace:*",
@@ -38,7 +38,7 @@
     "@effect/vitest": "catalog:",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
-    "@types/ws": "^8.5.13",
+    "@types/ws": "^8.18.1",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
