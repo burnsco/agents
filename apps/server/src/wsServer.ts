@@ -239,8 +239,12 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     let recipients = 0;
     for (const client of yield* Ref.get(clients)) {
       if (client.readyState === client.OPEN) {
-        client.send(message);
-        recipients += 1;
+        try {
+          client.send(message);
+          recipients += 1;
+        } catch {
+          // Socket may be in CLOSING state; skip and continue to other clients.
+        }
       }
     }
     logOutgoingPush(push, recipients);
@@ -543,6 +547,8 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     ).catch(() => {
       if (!res.headersSent) {
         respond(500, { "Content-Type": "text/plain" }, "Internal Server Error");
+      } else {
+        res.destroy();
       }
     });
   });
@@ -854,7 +860,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       },
     };
     logOutgoingPush(welcome, 1);
-    ws.send(JSON.stringify(welcome));
+    ws.send(Effect.runSync(encodePush(welcome)));
 
     ws.on("message", (raw) => {
       void runPromise(

@@ -129,6 +129,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         pendingUserInputs: new Map(),
         nextRequestId: 1,
         stopping: false,
+        isSendingTurn: false,
       };
 
       this.sessions.set(threadId, context);
@@ -275,7 +276,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   async sendTurn(input: CodexAppServerSendTurnInput): Promise<ProviderTurnStartResult> {
     const context = this.requireSession(input.threadId);
 
-    if (context.session.activeTurnId) {
+    if (context.session.activeTurnId || context.isSendingTurn) {
       throw new ProviderBusyError(input.threadId);
     }
 
@@ -355,7 +356,14 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       turnStartParams.collaborationMode = collaborationMode;
     }
 
-    const response = await this.sendRequest(context, "turn/start", turnStartParams);
+    context.isSendingTurn = true;
+
+    let response: unknown;
+    try {
+      response = await this.sendRequest(context, "turn/start", turnStartParams);
+    } finally {
+      context.isSendingTurn = false;
+    }
     const turn = readObject(readObject(response), "turn");
     const turnIdRaw = readString(turn, "id");
     if (!turnIdRaw) {

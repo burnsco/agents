@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { type ProviderEvent, ProviderItemId, ThreadId, TurnId } from "@agents/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ClaudeCodeAppServerManager } from "./claudeCodeAppServerManager.ts";
 import type {
@@ -108,6 +108,25 @@ function handleStreamEvent(
   ).handleStreamEvent(context, activeTurn, turnId, msg);
 }
 
+function handleControlRequest(
+  manager: ClaudeCodeAppServerManager,
+  context: ClaudeCodeSessionContext,
+  activeTurn: ClaudeCodeActiveTurnContext,
+  turnId: TurnId,
+  msg: Record<string, unknown>,
+) {
+  (
+    manager as unknown as {
+      handleControlRequest: (
+        context: ClaudeCodeSessionContext,
+        activeTurn: ClaudeCodeActiveTurnContext,
+        turnId: TurnId,
+        msg: Record<string, unknown>,
+      ) => void;
+    }
+  ).handleControlRequest(context, activeTurn, turnId, msg);
+}
+
 describe("ClaudeCodeAppServerManager", () => {
   it("emits assistant text from assistant messages when no stream deltas were sent", () => {
     const { manager, context, activeTurn, turnId, events } = createHarness();
@@ -173,5 +192,38 @@ describe("ClaudeCodeAppServerManager", () => {
     expect(events.find((event) => event.method === "item/agentMessage/delta")).toMatchObject({
       textDelta: "Hello",
     });
+  });
+
+  it("emits an approval decision when a pending approval times out", () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, context, activeTurn, turnId, events } = createHarness();
+
+      handleControlRequest(manager, context, activeTurn, turnId, {
+        request_id: "tool-call-1",
+        request: {
+          subtype: "can_use_tool",
+          tool_name: "Bash",
+          input: {
+            command: "pwd",
+          },
+        },
+      });
+
+      vi.advanceTimersByTime(5 * 60_000);
+
+      const decisionEvent = events.find(
+        (event) => event.method === "item/requestApproval/decision",
+      );
+      expect(decisionEvent).toMatchObject({
+        requestKind: "command",
+        payload: {
+          decision: "cancel",
+        },
+      });
+      expect(activeTurn.pendingApprovals.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

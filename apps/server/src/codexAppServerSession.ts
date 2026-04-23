@@ -60,6 +60,8 @@ export interface CodexSessionContext {
   pendingUserInputs: Map<ApprovalRequestId, PendingUserInputRequest>;
   nextRequestId: number;
   stopping: boolean;
+  /** True while sendTurn is awaiting the turn/start RPC response, before activeTurnId is set. */
+  isSendingTurn: boolean;
 }
 
 export type { CodexAccountSnapshot } from "./codexAppServerHelpers";

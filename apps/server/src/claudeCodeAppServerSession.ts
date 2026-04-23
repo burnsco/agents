@@ -30,6 +30,8 @@ export interface PendingApprovalRequest {
   threadId: ThreadId;
   turnId?: TurnId;
   itemId?: ProviderItemId;
+  /** Cancels the approval and unblocks the CLI if the user never responds. */
+  timeoutHandle: ReturnType<typeof setTimeout>;
 }
 
 // ── Content block tracking ─────────────────────────────────────────────

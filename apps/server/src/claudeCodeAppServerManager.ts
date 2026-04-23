@@ -73,6 +73,7 @@ export type {
 // ── Constants ──────────────────────────────────────────────────────────
 
 const TURN_TIMEOUT_MS = 20 * 60_000; // 20 minutes
+const APPROVAL_TIMEOUT_MS = 5 * 60_000; // 5 minutes — deny if user never responds
 
 // ── Event types ────────────────────────────────────────────────────────
 
@@ -360,6 +361,7 @@ export class ClaudeCodeAppServerManager extends EventEmitter<ClaudeCodeAppServer
       throw new Error(`Unknown pending approval request: ${requestId}`);
     }
 
+    clearTimeout(pendingRequest.timeoutHandle);
     activeTurn.pendingApprovals.delete(requestId);
 
     const isApproved = decision === "accept" || decision === "acceptForSession";
@@ -374,23 +376,7 @@ export class ClaudeCodeAppServerManager extends EventEmitter<ClaudeCodeAppServer
       // stdin may have closed if the turn already ended
     }
 
-    this.emitEvent({
-      id: EventId.makeUnsafe(randomUUID()),
-      kind: "notification",
-      provider: "claude-code",
-      threadId: context.session.threadId,
-      createdAt: new Date().toISOString(),
-      method: "item/requestApproval/decision",
-      ...(pendingRequest.turnId ? { turnId: pendingRequest.turnId } : {}),
-      ...(pendingRequest.itemId ? { itemId: pendingRequest.itemId } : {}),
-      requestId: pendingRequest.requestId,
-      requestKind: pendingRequest.requestKind,
-      payload: {
-        requestId: pendingRequest.requestId,
-        requestKind: pendingRequest.requestKind,
-        decision,
-      },
-    });
+    this.emitApprovalDecisionEvent(context, pendingRequest, decision);
   }
 
   async respondToUserInput(
@@ -411,6 +397,7 @@ export class ClaudeCodeAppServerManager extends EventEmitter<ClaudeCodeAppServer
     context.stopping = true;
 
     if (context.activeTurn) {
+      this.clearPendingApprovalTimeouts(context.activeTurn);
       killChildTree(context.activeTurn.child);
       context.activeTurn.output.close();
       delete context.activeTurn;
@@ -943,10 +930,8 @@ export class ClaudeCodeAppServerManager extends EventEmitter<ClaudeCodeAppServer
     const toolInput = request.input;
     const requestKind = requestKindFromToolName(toolName);
 
-    // Find associated tool item if already tracked
-    const existingItem = Array.from(activeTurn.toolItems.values()).find(
-      (item) => item.toolName === toolName && !item.input,
-    );
+    // Match by tool_use_id (claudeRequestId) to correctly associate parallel tool calls of the same tool.
+    const existingItem = activeTurn.toolItems.get(claudeRequestId);
     const itemId = existingItem?.itemId ?? ProviderItemId.makeUnsafe(randomUUID());
 
     if (!existingItem) {
@@ -961,6 +946,18 @@ export class ClaudeCodeAppServerManager extends EventEmitter<ClaudeCodeAppServer
     }
 
     const requestId = ApprovalRequestId.makeUnsafe(randomUUID());
+    const timeoutHandle = setTimeout(() => {
+      if (!activeTurn.pendingApprovals.has(requestId)) return;
+      activeTurn.pendingApprovals.delete(requestId);
+      try {
+        activeTurn.child.stdin.write(
+          `${buildControlBlockResponse(claudeRequestId, "Approval request timed out.")}\n`,
+        );
+      } catch {
+        // ignore
+      }
+      this.emitApprovalDecisionEvent(context, pendingRequest, "cancel");
+    }, APPROVAL_TIMEOUT_MS);
     const pendingRequest: PendingApprovalRequest = {
       requestId,
       claudeRequestId,
@@ -970,6 +967,7 @@ export class ClaudeCodeAppServerManager extends EventEmitter<ClaudeCodeAppServer
       threadId: context.session.threadId,
       turnId,
       itemId,
+      timeoutHandle,
     };
 
     activeTurn.pendingApprovals.set(requestId, pendingRequest);
@@ -1160,6 +1158,8 @@ export class ClaudeCodeAppServerManager extends EventEmitter<ClaudeCodeAppServer
     const activeTurn = context.activeTurn;
     if (!activeTurn || activeTurn.turnId !== turnId) return;
 
+    this.clearPendingApprovalTimeouts(activeTurn);
+
     // Complete any lingering started items
     for (const itemId of activeTurn.startedItemIds) {
       const toolCtx = Array.from(activeTurn.toolItems.values()).find((t) => t.itemId === itemId);
@@ -1204,6 +1204,37 @@ export class ClaudeCodeAppServerManager extends EventEmitter<ClaudeCodeAppServer
     });
 
     delete context.activeTurn;
+  }
+
+  private clearPendingApprovalTimeouts(activeTurn: ClaudeCodeActiveTurnContext): void {
+    for (const pendingRequest of activeTurn.pendingApprovals.values()) {
+      clearTimeout(pendingRequest.timeoutHandle);
+    }
+    activeTurn.pendingApprovals.clear();
+  }
+
+  private emitApprovalDecisionEvent(
+    context: ClaudeCodeSessionContext,
+    pendingRequest: PendingApprovalRequest,
+    decision: ProviderApprovalDecision,
+  ): void {
+    this.emitEvent({
+      id: EventId.makeUnsafe(randomUUID()),
+      kind: "notification",
+      provider: "claude-code",
+      threadId: context.session.threadId,
+      createdAt: new Date().toISOString(),
+      method: "item/requestApproval/decision",
+      ...(pendingRequest.turnId ? { turnId: pendingRequest.turnId } : {}),
+      ...(pendingRequest.itemId ? { itemId: pendingRequest.itemId } : {}),
+      requestId: pendingRequest.requestId,
+      requestKind: pendingRequest.requestKind,
+      payload: {
+        requestId: pendingRequest.requestId,
+        requestKind: pendingRequest.requestKind,
+        decision,
+      },
+    });
   }
 
   private emitLifecycleEvent(

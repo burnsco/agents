@@ -549,6 +549,26 @@ describe("sendTurn", () => {
       }),
     ).rejects.toThrow("Turn input must include text or attachments.");
   });
+
+  it("clears the send-in-flight flag when preflight validation fails", async () => {
+    const { manager, context } = createSendTurnHarness();
+    Object.assign(context, {
+      pending: new Map(),
+      pendingApprovals: new Map(),
+      pendingUserInputs: new Map(),
+      nextRequestId: 1,
+      stopping: false,
+      isSendingTurn: false,
+    });
+
+    await expect(
+      manager.sendTurn({
+        threadId: asThreadId("thread_1"),
+      }),
+    ).rejects.toThrow("Turn input must include text or attachments.");
+
+    expect((context as unknown as { isSendingTurn: boolean }).isSendingTurn).toBe(false);
+  });
 });
 
 describe("thread checkpoint control", () => {

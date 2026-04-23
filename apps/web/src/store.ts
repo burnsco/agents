@@ -63,9 +63,9 @@ function readPersistedState(): AppState {
   try {
     const raw = window.localStorage.getItem(PERSISTED_STATE_KEY);
     if (!raw) return initialState;
-    const parsed = JSON.parse(raw) as { expandedProjectCwds?: string[] };
+    const parsed = JSON.parse(raw) as { expandedProjectCwds?: unknown };
     persistedExpandedProjectCwds.clear();
-    for (const cwd of parsed.expandedProjectCwds ?? []) {
+    for (const cwd of Array.isArray(parsed.expandedProjectCwds) ? parsed.expandedProjectCwds : []) {
       if (typeof cwd === "string" && cwd.length > 0) {
         persistedExpandedProjectCwds.add(cwd);
       }
@@ -95,8 +95,8 @@ function persistState(state: AppState): void {
             .map((project) => project.cwd),
         }),
       );
-    } catch {
-      // Ignore quota/storage errors to avoid breaking chat UX.
+    } catch (error) {
+      console.warn("[agents] Failed to persist state to localStorage:", error);
     }
   }, PERSIST_DEBOUNCE_MS);
 }
@@ -165,7 +165,11 @@ function toLegacySessionStatus(
 }
 
 function toLegacyProvider(providerName: string | null): ProviderKind {
-  return isProviderKind(providerName) ? providerName : "codex";
+  if (!isProviderKind(providerName)) {
+    console.warn("[agents] Unknown provider name, falling back to codex:", providerName);
+    return "codex";
+  }
+  return providerName;
 }
 
 function inferProviderForThreadModel(input: {
@@ -293,18 +297,19 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
       };
     });
 
+  // Precompute latest thread createdAt per project to avoid O(P² · T log T) comparisons.
+  const latestThreadCreatedAt = new Map<string, string>();
+  for (const t of threads) {
+    const current = latestThreadCreatedAt.get(t.projectId);
+    if (!current || t.createdAt > current) {
+      latestThreadCreatedAt.set(t.projectId, t.createdAt);
+    }
+  }
+
   // Sort projects by latest thread update descending, falling back to project updatedAt
   const projects = mappedProjects.toSorted((a, b) => {
-    const aLatestThread = threads
-      .filter((t) => t.projectId === a.id)
-      .toSorted((t1, t2) => t2.createdAt.localeCompare(t1.createdAt))[0];
-    const bLatestThread = threads
-      .filter((t) => t.projectId === b.id)
-      .toSorted((t1, t2) => t2.createdAt.localeCompare(t1.createdAt))[0];
-
-    const aTime = aLatestThread?.createdAt ?? a.updatedAt;
-    const bTime = bLatestThread?.createdAt ?? b.updatedAt;
-
+    const aTime = latestThreadCreatedAt.get(a.id) ?? a.updatedAt;
+    const bTime = latestThreadCreatedAt.get(b.id) ?? b.updatedAt;
     return bTime.localeCompare(aTime);
   });
 
@@ -442,13 +447,15 @@ function flushPersistState(): void {
           .map((project) => project.cwd),
       }),
     );
-  } catch {
-    // Ignore
+  } catch (error) {
+    console.warn("[agents] Failed to persist state to localStorage:", error);
   }
 }
 
 if (typeof window !== "undefined") {
   window.addEventListener("beforeunload", flushPersistState);
+  // iOS Safari fires pagehide instead of beforeunload for BFCache navigation.
+  window.addEventListener("pagehide", flushPersistState);
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
